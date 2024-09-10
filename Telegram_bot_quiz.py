@@ -2,20 +2,25 @@ import telebot
 from telebot import types
 import random
 
-TOKEN_TELEGRAM = 'xxx'
+TOKEN_TELEGRAM = '7458243883:AAEsDk3kOuQxV3BI9zmLnsx_nN1iMUmtgBw'
 bot = telebot.TeleBot(TOKEN_TELEGRAM)
 Total_PROGRESS_of_RESPONSES = {}
+game_states = {}
 
 
 @bot.message_handler(commands=['start'])
 def message_start(message):
-    bot.send_message(message.chat.id,
-                     'Команды для управления ботом:\n/start - начать сначала.\n/start_game - начать игру.')
+    chat_id = message.chat.id
+    game_states[chat_id] = 'idle'
+    bot.send_message(chat_id,
+                     'Команды для управления ботом:\n/start - начать сначала.\n/start_game - начать игру.\n/reset_game - сброс игры.',
+                     reply_markup=types.ReplyKeyboardRemove())
 
 
 @bot.message_handler(commands=['start_game'])
 def start_game_message(message):
     chat_id = message.chat.id
+    game_states[chat_id] = 'playing'
     Total_PROGRESS_of_RESPONSES[chat_id] = 0
     bot.send_message(chat_id, 'Добро пожаловать в игру "Угадай число"')
     markup = types.ReplyKeyboardMarkup(row_width=2)
@@ -26,13 +31,36 @@ def start_game_message(message):
     bot.send_message(chat_id, 'Вы хотите продолжить?', reply_markup=markup)
 
 
+@bot.message_handler(commands=['reset_game'])
+def reset_function(message):
+    chat_id = message.chat.id
+    if chat_id not in game_states or game_states[chat_id] == 'idle':
+        bot.send_message(chat_id, 'Сначала вы должны нажать на /start_game, чтобы начать игру.')
+    else:
+        Total_PROGRESS_of_RESPONSES[chat_id] = 0
+        bot.send_message(chat_id, 'Произошел сброс игры', reply_markup=types.ReplyKeyboardRemove())
+        markup = types.ReplyKeyboardMarkup(row_width=2)
+        btn_yes = types.KeyboardButton('Да')
+        btn_no = types.KeyboardButton('Нет')
+        btn_website = types.KeyboardButton('Посмотреть исходный код на сайте GitHub')
+        markup.add(btn_yes, btn_no, btn_website)
+        bot.send_message(chat_id, 'Вы хотите продолжить?', reply_markup=markup)
+
+
 @bot.message_handler(func=lambda message: message.text.lower() == 'да')
 def yes_choice(message):
-    bot.send_message(message.chat.id, 'Введите максимальное число для генерации случайного числа')
-    bot.register_next_step_handler(message, func_log)
+    chat_id = message.chat.id
+    if chat_id not in game_states or game_states[chat_id] == 'idle':
+        bot.send_message(chat_id, 'Сначала вы должны нажать на /start_game, чтобы начать игру.')
+    else:
+        bot.send_message(chat_id, 'Введите максимальное число для генерации случайного числа', reply_markup=types.ReplyKeyboardRemove())
+        bot.register_next_step_handler(message, func_log)
 
 
 def func_log(message):
+    if message.text.lower() == '/reset_game':
+        reset_function(message)
+        return
     try:
         text_message = message.text
         result = random.randint(1, int(text_message))
@@ -45,11 +73,15 @@ def func_log(message):
 
 
 def call(message, result):
+    if message.text.lower() == '/reset_game':
+        reset_function(message)
+        return
     try:
         text_random = int(message.text)
         if text_random > 0:
             if text_random == result:
                 bot.send_message(message.chat.id, f'Вы угадали число! Загаданное число: {result}')
+                bot.send_message(message.chat.id, 'Вы хотите начать новую игру?', reply_markup=types.ReplyKeyboardMarkup(row_width=2).add(types.KeyboardButton('Да'), types.KeyboardButton('Нет')))
             elif text_random > result:
                 bot.send_message(message.chat.id, 'Загаданное число меньше.')
                 bot.register_next_step_handler(message, call, result)
@@ -66,9 +98,13 @@ def call(message, result):
 
 @bot.message_handler(func=lambda message: message.text.lower() == 'нет')
 def message_quiz(message):
-    bot.send_message(message.chat.id, 'Плохой выбор.')
-    bot.send_message(message.chat.id, 'Играем в викторину.')
-    message_func_quiz(message)
+    chat_id = message.chat.id
+    if chat_id not in game_states or game_states[chat_id] == 'idle':
+        bot.send_message(chat_id, 'Сначала вы должны нажать на /start_game, чтобы начать игру.')
+    else:
+        bot.send_message(chat_id, 'Плохой выбор.')
+        bot.send_message(chat_id, 'Играем в викторину.')
+        message_func_quiz(message)
 
 
 def message_func_quiz(message):
@@ -84,15 +120,16 @@ def message_func_quiz(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz1_'))
 def handle_quiz_answer(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Меркурий':
         bot.send_message(chat_id,
                          'Правильно! Меркурий — самая близкая к Солнцу планета нашей Солнечной системы. Она расположена на среднем расстоянии около 58 миллионов километров от Солнца. Из-за своей близости к Солнцу, Меркурий имеет очень высокие дневные температуры и очень низкие ночные температуры. Планета совершает полный оборот вокруг Солнца примерно за 88 земных дней.')
         Total_PROGRESS_of_RESPONSES[chat_id] += 1
-        ask_next_question(call.message)
     else:
         bot.send_message(chat_id, 'Неправильно, правильный ответ: Меркурий')
-        ask_next_question(call.message)
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
+    ask_next_question(call.message)
 
 
 def ask_next_question(message):
@@ -102,13 +139,13 @@ def ask_next_question(message):
     btn_3 = types.InlineKeyboardButton('Диагональ', callback_data='quiz2_Диагональ')
     btn_4 = types.InlineKeyboardButton('Периметр', callback_data='quiz2_Периметр')
     markup.add(btn_1, btn_2, btn_3, btn_4)
-    bot.send_message(message.chat.id, "Как называется самая длинная сторона прямоугольного треугольника?",
-                     reply_markup=markup)
+    bot.send_message(message.chat.id, "Как называется самая длинная сторона прямоугольного треугольника?", reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz2_'))
 def handle_next_question(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Гипотенуза':
         bot.send_message(chat_id,
@@ -117,6 +154,7 @@ def handle_next_question(call):
     else:
         correct_answer = 'Гипотенуза'
         bot.send_message(chat_id, f'Неправильно, правильный ответ: {correct_answer}')
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
     ask_next_question_3(call.message)
 
 
@@ -127,13 +165,13 @@ def ask_next_question_3(message):
     btn_3 = types.InlineKeyboardButton('Моль', callback_data='quiz3_Моль')
     btn_4 = types.InlineKeyboardButton('Джоуль', callback_data='quiz3_Джоуль')
     markup.add(btn_1, btn_2, btn_3, btn_4)
-    bot.send_message(message.chat.id, "Как называется величина, характеризующая количество вещества?",
-                     reply_markup=markup)
+    bot.send_message(message.chat.id, "Как называется величина, характеризующая количество вещества?", reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz3_'))
 def handler_next_question3(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Моль':
         bot.send_message(chat_id,
@@ -142,6 +180,7 @@ def handler_next_question3(call):
     else:
         correct_answer = 'Моль'
         bot.send_message(chat_id, f'Ответ неверный. Правильный ответ: {correct_answer}')
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
     ask_next_question_4(call.message)
 
 
@@ -160,6 +199,7 @@ def ask_next_question_4(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz4_'))
 def handler_next_question4(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Радиус':
         bot.send_message(chat_id,
@@ -168,6 +208,7 @@ def handler_next_question4(call):
     else:
         correct_answer = 'Радиус'
         bot.send_message(chat_id, f'Ответ неверный. Правильный ответ: {correct_answer}')
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
     ask_next_question_5(call.message)
 
 
@@ -186,6 +227,7 @@ def ask_next_question_5(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz5_'))
 def handler_next_question5(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Линейная':
         bot.send_message(chat_id,
@@ -194,6 +236,7 @@ def handler_next_question5(call):
     else:
         correct_answer = 'Линейная'
         bot.send_message(chat_id, f'Ответ неверный. Правильный ответ: {correct_answer}')
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
     ask_next_question_6(call.message)
 
 
@@ -212,6 +255,7 @@ def ask_next_question_6(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('quiz6_'))
 def handler_next_question6(call):
     chat_id = call.message.chat.id
+    message_id = call.message.message_id
     answer = call.data.split('_')[1]
     if answer == 'Атом':
         bot.send_message(chat_id,
@@ -220,6 +264,7 @@ def handler_next_question6(call):
     else:
         correct_answer = 'Атом'
         bot.send_message(chat_id, f'Ответ неверный. Правильный ответ: {correct_answer}')
+    bot.delete_message(chat_id, message_id)  # Удаление предыдущего вопроса
     value_results(call.message)
 
 
